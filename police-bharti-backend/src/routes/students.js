@@ -2,37 +2,46 @@
 const express = require('express');
 const Student = require('../models/student');
 const Batch = require('../models/batch');
-const { auth, requireRole } = require('../middlewares/auth');
+const { auth } = require('../middlewares/auth');
 const router = express.Router();
 
-// Create student (owner or teacher) - owner can set fees, teacher cannot
+// Create student (owner or teacher)
 router.post('/', auth, async (req, res) => {
   try {
     const body = { ...req.body };
-    if (!body.firstName || !body.batch) return res.status(400).json({ message: 'Missing firstName or batch' });
 
-    // check batch exists
+    if (!body.fullName || !body.batch) {
+      return res.status(400).json({ message: 'Missing fullName or batch' });
+    }
+
+    // Check batch exists
     const batch = await Batch.findById(body.batch);
     if (!batch) return res.status(400).json({ message: 'Batch not found' });
 
-    // If teacher, remove fees from payload
+    // Teachers cannot modify fees
     if (req.user.role === 'teacher') {
       delete body.fees;
+    }
+
+    // Remove invalid empty enum fields
+    if (!body.modeOfClass) delete body.modeOfClass;
+
+    // Ensure subjects is an array of ObjectIds
+    if (body.subjects && !Array.isArray(body.subjects)) {
+      body.subjects = [body.subjects];
     }
 
     const student = new Student(body);
     await student.save();
 
-    // (optional) add student reference in batch (not strictly needed if we query students by batch)
-    // await Batch.findByIdAndUpdate(body.batch, { $push: { students: student._id }});
-
-    res.json({ message: 'Student added', student });
+    res.status(201).json({ message: 'Student added successfully', student });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// List students (filter by batch, role-based projection & pagination)
+
+// List students (filter, search, pagination, role-based projection)
 router.get('/', auth, async (req, res) => {
   try {
     const { batch, page = 1, limit = 50, q } = req.query;
@@ -42,8 +51,10 @@ router.get('/', auth, async (req, res) => {
 
     const projection = (req.user.role === 'teacher') ? '-fees' : ''; // hide fees for teachers
 
-    const students = await Student.find(filter).select(projection)
-      .skip((page - 1) * limit).limit(Number(limit))
+    const students = await Student.find(filter)
+      .select(projection)
+      .skip((page - 1) * limit)
+      .limit(Number(limit))
       .populate('batch', 'title startDate endDate');
 
     res.json({ students });
@@ -52,37 +63,47 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// Get student by id — owner sees fees, teacher does not
+// Get student by ID
 router.get('/:id', auth, async (req, res) => {
   try {
-    const student = (req.user.role === 'teacher')
-      ? await Student.findById(req.params.id).select('-fees').populate('batch', 'title')
-      : await Student.findById(req.params.id).populate('batch', 'title');
+    const projection = req.user.role === 'teacher' ? '-fees' : '';
+    const student = await Student.findById(req.params.id)
+      .select(projection)
+      .populate('batch', 'title startDate endDate');
 
     if (!student) return res.status(404).json({ message: 'Student not found' });
-    // If teacher, ensure they are allowed (i.e., teacher is assigned to student's batch)
+
+    // Verify teacher permission
     if (req.user.role === 'teacher') {
       const batch = await Batch.findById(student.batch);
       if (!batch || !batch.teachers.some(t => t.equals(req.user._id))) {
         return res.status(403).json({ message: 'Not allowed' });
       }
     }
+
     res.json({ student });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Update student (owner can update fees; teacher cannot modify fees)
+// Update student
 router.patch('/:id', auth, async (req, res) => {
   try {
     const updates = { ...req.body };
-    if (req.user.role === 'teacher') delete updates.fees; // enforce server-side
 
-    const student = await Student.findByIdAndUpdate(req.params.id, updates, { new: true });
+    if (req.user.role === 'teacher') {
+      delete updates.fees; // prevent teacher fee edits
+    }
+
+    const student = await Student.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true
+    });
+
     if (!student) return res.status(404).json({ message: 'Student not found' });
 
-    res.json({ message: 'Updated', student });
+    res.json({ message: 'Student updated successfully', student });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

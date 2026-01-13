@@ -1,36 +1,65 @@
-const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
-const userSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  role: { type: String, enum: ["owner", "teacher"], default: "teacher" }, // default teacher
-  isActive: { type: Boolean, default: true }, // owner can disable teacher
-}, { timestamps: true });
+// src/models/user.js
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
-// pre-save: hash password if modified
-userSchema.pre('save', async function(next) {
+const userSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    role: { type: String, enum: ['owner', 'teacher'], required: true },
+    isActive: { type: Boolean, default: true },
+
+    // Teacher details
+    dob: { type: Date },
+    gender: { type: String },
+    mobile: { type: String },
+    address: { type: String },
+    highestDegree: { type: String },
+    college: { type: String },
+    graduationYear: { type: String },
+    certifications: { type: String },
+    teachingExperience: { type: String },
+    previousInstitutions: { type: String },
+    specialSkills: { type: String },
+    subjectsTaught: [{ type: String }],
+    availabilityTimings: [{ type: String }],
+    preferredDays: [{ type: String }],
+    willingToTravel: { type: Boolean, default: false },
+    onlineTeaching: { type: Boolean, default: false },
+    maxStudentsPerBatch: { type: Number },
+    expectedSalary: { type: Number },
+    additionalNotes: { type: String },
+
+    // New sections
+    documents: {
+      adharNumber: { type: String },
+      panNumber: { type: String },
+      bank: { type: String }
+    },
+    salary: {
+      accountNumber: { type: String }
+    }
+
+  },
+  { timestamps: true }
+);
+
+// Hash password before saving
+userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
-  try {
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
-    next();
-  } catch (err) {
-    next(err);
-  }
+  this.password = await bcrypt.hash(this.password, 10);
+  next();
 });
 
-// instance method to compare password
-userSchema.methods.comparePassword = function(plain) {
-  return bcrypt.compare(plain, this.password);
-};
-
-// hide password and __v in JSON output
-userSchema.methods.toJSON = function() {
+userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
-  delete obj.__v;
   return obj;
 };
 
-module.exports = mongoose.model("user", userSchema);
+userSchema.methods.comparePassword = async function(candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password);
+};
+
+module.exports = mongoose.model('User', userSchema);
